@@ -5,17 +5,19 @@ from __future__ import print_function
 import torch
 import numpy as np
 
-from models.losses import FocalLoss, RegL1Loss, RegLoss, RegWeightedL1Loss, BinRotLoss,Position_loss
+from models.losses import FocalLoss, RegL1Loss, RegLoss, RegWeightedL1Loss, BinRotLoss,Position_loss,CenterNetGaussianFocalLoss
 from models.decode import car_pose_decode
 from models.utils import _sigmoid
 from utils.debugger import Debugger
 from utils.post_process import car_pose_post_process
 from .base_trainer import BaseTrainer
+
+
 class CarPoseLoss(torch.nn.Module):
     def __init__(self, opt):
         super(CarPoseLoss, self).__init__()
-        self.crit = FocalLoss()
-        self.crit_hm_hp = torch.nn.MSELoss() if opt.mse_loss else FocalLoss()
+        self.crit = CenterNetGaussianFocalLoss()#FocalLoss()
+        self.crit_hm_hp = CenterNetGaussianFocalLoss()#torch.nn.MSELoss() if opt.mse_loss else FocalLoss()
         self.crit_kp = RegWeightedL1Loss() if not opt.dense_hp else \
             torch.nn.L1Loss(reduction='sum')
         self.crit_reg = RegL1Loss() if opt.reg_loss == 'l1' else \

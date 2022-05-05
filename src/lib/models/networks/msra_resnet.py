@@ -17,6 +17,9 @@ import torch.utils.model_zoo as model_zoo
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
+
+from src.lib.models.networks.module_utils import DilateEncoder, ResizeConv, Conv
+
 BN_MOMENTUM = 0.1
 
 model_urls = {
@@ -125,11 +128,30 @@ class PoseResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
 
         # used for deconv layers
-        self.deconv_layers = self._make_deconv_layer(
-            3,
-            [256, 256, 256],
-            [4, 4, 4],
-        )
+        # self.deconv_layers = self._make_deconv_layer(
+        #     3,
+        #     [256, 256, 256],
+        #     [4, 4, 4],
+        # )
+
+        print("Use backbone : resnet-18")
+        c2, c3, c4, c5 = 64, 128, 256, 512
+        p2, p3, p4, p5 = 256, 256, 256, 256
+        act = 'relu'
+        self.neck = DilateEncoder(c1=c5, c2=p5, act=act)
+
+        # upsample
+        self.deconv4 = ResizeConv(c1=p5, c2=p4, act=act, scale_factor=2)  # 32 -> 16
+        self.latter4 = Conv(c4, p4, k=1, act=None)
+        self.smooth4 = Conv(p4, p4, k=3, p=1, act=act)
+
+        self.deconv3 = ResizeConv(c1=p4, c2=p3, act=act, scale_factor=2)  # 16 -> 8
+        self.latter3 = Conv(c3, p3, k=1, act=None)
+        self.smooth3 = Conv(p3, p3, k=3, p=1, act=act)
+
+        self.deconv2 = ResizeConv(c1=p3, c2=p2, act=act, scale_factor=2)  # 8 -> 4
+        self.latter2 = Conv(c2, p2, k=1, act=None)
+        self.smooth2 = Conv(p2, p2, k=3, p=1, act=act)
         # self.final_layer = []
 
         for head in sorted(self.heads):
@@ -211,23 +233,28 @@ class PoseResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.conv1(x)
+        x = self.conv1(x)#/2
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x)
+        x = self.maxpool(x)#/4
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        c2 = self.layer1(x)#/4
+        c3 = self.layer2(c2)#/8
+        c4 = self.layer3(c3)#/16
+        c5 = self.layer4(c4)#/32 (12,40)
 
-        x = self.deconv_layers(x)
+        # x = self.deconv_layers(x)#/4 (512,96,320)
+        p5 = self.neck(c5)
+        p4 = self.smooth4(self.latter4(c4) + self.deconv4(p5))
+        p3 = self.smooth3(self.latter3(c3) + self.deconv3(p4))
+        p2 = self.smooth2(self.latter2(c2) + self.deconv2(p3))
+
         ret = {}
         # a = self.__getattr__(head)[0](x)
         # a = self.__getattr__(head)[1](a)
         #self.draw_features(16, 16, x.cpu().numpy(), './exp/{}.png'.format('sd'))
         for head in self.heads:
-            ret[head] = self.__getattr__(head)(x)
+            ret[head] = self.__getattr__(head)(p2)
         return [ret]
 
     def draw_features(self,width, height, x, savename):
@@ -252,18 +279,18 @@ class PoseResNet(nn.Module):
     def init_weights(self, num_layers, pretrained=True):
         if pretrained:
             # print('=> init resnet deconv weights from normal distribution')
-            for _, m in self.deconv_layers.named_modules():
-                if isinstance(m, nn.ConvTranspose2d):
-                    # print('=> init {}.weight as normal(0, 0.001)'.format(name))
-                    # print('=> init {}.bias as 0'.format(name))
-                    nn.init.normal_(m.weight, std=0.001)
-                    if self.deconv_with_bias:
-                        nn.init.constant_(m.bias, 0)
-                elif isinstance(m, nn.BatchNorm2d):
-                    # print('=> init {}.weight as 1'.format(name))
-                    # print('=> init {}.bias as 0'.format(name))
-                    nn.init.constant_(m.weight, 1)
-                    nn.init.constant_(m.bias, 0)
+            # for _, m in self.deconv_layers.named_modules():
+            #     if isinstance(m, nn.ConvTranspose2d):
+            #         # print('=> init {}.weight as normal(0, 0.001)'.format(name))
+            #         # print('=> init {}.bias as 0'.format(name))
+            #         nn.init.normal_(m.weight, std=0.001)
+            #         if self.deconv_with_bias:
+            #             nn.init.constant_(m.bias, 0)
+            #     elif isinstance(m, nn.BatchNorm2d):
+            #         # print('=> init {}.weight as 1'.format(name))
+            #         # print('=> init {}.bias as 0'.format(name))
+            #         nn.init.constant_(m.weight, 1)
+            #         nn.init.constant_(m.bias, 0)
             # print('=> init final conv weights from normal distribution')
             for head in self.heads:
               final_layer = self.__getattr__(head)
@@ -302,3 +329,4 @@ def get_pose_net(num_layers, heads, head_conv):
   model = PoseResNet(block_class, layers, heads, head_conv=head_conv)
   model.init_weights(num_layers, pretrained=True)
   return model
+

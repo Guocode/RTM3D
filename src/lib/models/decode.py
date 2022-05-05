@@ -589,8 +589,8 @@ def gen_position(kps,dim,rot,meta,const):
     si = torch.zeros_like(kps[:, :, 0:1]) + calib[:, 0:1, 0:1]
     alpha_idx = rot[:, :, 1] > rot[:, :, 5]
     alpha_idx = alpha_idx.float()
-    alpha1 = torch.atan(rot[:, :, 2] / rot[:, :, 3]) + (-0.5 * np.pi)
-    alpha2 = torch.atan(rot[:, :, 6] / rot[:, :, 7]) + (0.5 * np.pi)
+    alpha1 = torch.atan2(rot[:, :, 2] , rot[:, :, 3]) + (-0.5 * np.pi)
+    alpha2 = torch.atan2(rot[:, :, 6] , rot[:, :, 7]) + (0.5 * np.pi)
     alpna_pre = alpha1 * alpha_idx + alpha2 * (1 - alpha_idx)
     alpna_pre = alpna_pre.unsqueeze(2)
     # alpna_pre=rot_gt
